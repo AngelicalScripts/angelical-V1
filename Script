@@ -1,0 +1,356 @@
+local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/jensonhirst/Orion/main/source')))()
+
+local Window = OrionLib:MakeWindow({Name = "Angelical's Universal Aimbot V1", HidePremium = false, SaveConfig = true, ConfigFolder = "OrionTest"})
+
+local Tab = Window:MakeTab({
+	Name = "Aimbot Universal",
+	Icon = "rbxassetid://4483345998",
+	PremiumOnly = false
+})
+
+-- Variables
+local aimAtPart = "HumanoidRootPart"
+local aimbotEnabled = false
+local wallCheckEnabled = false
+local teamCheckEnabled = false
+local espEnabled = false
+ 
+-- Functions
+local function getClosestTarget()
+    local Cam = workspace.CurrentCamera
+    local Players = game:GetService("Players")
+    local localPlayer = Players.LocalPlayer
+    local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+    local localRoot = character:WaitForChild("HumanoidRootPart")
+    local nearestTarget = nil
+    local shortestDistance = math.huge
+ 
+    local function checkTarget(target)
+        if target and target:IsA("Model") and target:FindFirstChild("Humanoid") and target:FindFirstChild(aimAtPart) then
+            local targetRoot = target[aimAtPart]
+            local distance = (targetRoot.Position - localRoot.Position).Magnitude
+ 
+            if distance < shortestDistance then
+                if wallCheckEnabled then
+                    local rayDirection = (targetRoot.Position - Cam.CFrame.Position).Unit * 1000
+                    local raycastParams = RaycastParams.new()
+                    raycastParams.FilterDescendantsInstances = {character}
+                    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+ 
+                    local raycastResult = workspace:Raycast(Cam.CFrame.Position, rayDirection, raycastParams)
+ 
+                    if raycastResult and raycastResult.Instance:IsDescendantOf(target) then
+                        shortestDistance = distance
+                        nearestTarget = target
+                    end
+                else
+                    shortestDistance = distance
+                    nearestTarget = target
+                end
+            end
+        end
+    end
+ 
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= localPlayer and (not teamCheckEnabled or player.Team ~= localPlayer.Team) then
+            checkTarget(player.Character)
+        end
+    end
+ 
+    if targetNPCs then
+        for _, npc in pairs(workspace:GetDescendants()) do
+            checkTarget(npc)
+        end
+    end
+ 
+    return nearestTarget
+end
+ 
+local function lookAt(targetPosition)
+    local Cam = workspace.CurrentCamera
+    if targetPosition then
+        Cam.CFrame = CFrame.new(Cam.CFrame.Position, targetPosition)
+    end
+end
+ 
+local function aimAtTarget()
+    local runService = game:GetService("RunService")
+    local connection
+    connection = runService.RenderStepped:Connect(function()
+        if not aimbotEnabled then
+            connection:Disconnect()
+            return
+        end
+ 
+        local closestTarget = getClosestTarget()
+        if closestTarget and closestTarget:FindFirstChild(aimAtPart) then
+            local targetRoot = closestTarget[aimAtPart]
+ 
+            while aimbotEnabled and closestTarget and closestTarget:FindFirstChild(aimAtPart) and closestTarget.Humanoid.Health > 0 do
+                lookAt(targetRoot.Position)
+                local rayDirection = (targetRoot.Position - workspace.CurrentCamera.CFrame.Position).Unit * 1000
+                local raycastParams = RaycastParams.new()
+                raycastParams.FilterDescendantsInstances = {character}
+                raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+ 
+                local raycastResult = workspace:Raycast(workspace.CurrentCamera.CFrame.Position, rayDirection, raycastParams)
+ 
+                if not raycastResult or not raycastResult.Instance:IsDescendantOf(closestTarget) then
+                    break
+                end
+ 
+                runService.RenderStepped:Wait()
+            end
+        end
+    end)
+end
+ 
+local function resizeHeads()
+    local Players = game:GetService("Players")
+    local localPlayer = Players.LocalPlayer
+ 
+    local function resizeHead(model)
+        local head = model:FindFirstChild("Head")
+        if head and head:IsA("BasePart") then
+            head.Size = Vector3.new(5, 5, 5)
+            head.CanCollide = false
+        end
+    end
+ 
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= localPlayer and player.Character then
+            resizeHead(player.Character)
+        end
+    end
+ 
+    for _, npc in pairs(workspace:GetDescendants()) do
+        if npc:IsA("Model") and npc:FindFirstChild("Head") then
+            resizeHead(npc)
+        end
+    end
+end
+ 
+
+-- ESP settings
+local espEnabled = false
+local espConnections = {}
+local espSettings = {
+    NameColor = Color3.fromRGB(255, 182, 193), -- Light Pink
+    FullHealthColor = Color3.fromRGB(0, 255, 0),
+    LowHealthColor = Color3.fromRGB(255, 0, 0),
+    DistanceColor = Color3.fromRGB(173, 216, 230), -- Light Blue
+    WalkSpeedColor = Color3.fromRGB(255, 105, 180), -- Hot Pink
+    BackgroundTransparency = 0.5,
+    TextOffset = Vector3.new(0, 3.5, 0),
+    MaxDistance = 5000 -- Maximum distance to show ESP
+}
+
+-- Function to create a combined ESP text label
+local function createESPLabel(adornee, offset, color, text)
+    local billboardGui = Instance.new("BillboardGui")
+    billboardGui.Adornee = adornee
+    billboardGui.Size = UDim2.new(5, 0, 1.5, 0)
+    billboardGui.StudsOffset = offset
+    billboardGui.AlwaysOnTop = true
+
+    local textLabel = Instance.new("TextLabel", billboardGui)
+    textLabel.Text = text
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.TextColor3 = color
+    textLabel.BackgroundTransparency = espSettings.BackgroundTransparency
+    textLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    textLabel.TextStrokeTransparency = 0
+    textLabel.TextScaled = true
+    textLabel.BorderSizePixel = 0
+    textLabel.Font = Enum.Font.SourceSans -- Set font
+    textLabel.TextWrapped = true -- Ensure text wraps
+
+    return billboardGui, textLabel
+end
+
+-- Function to create ESP for a player
+local function createESP(player)
+    local function refreshESP(character)
+        -- Remove any existing ESP for the character
+        for _, v in pairs(character:GetChildren()) do
+            if v:IsA("BoxHandleAdornment") or v:IsA("BillboardGui") then
+                v:Destroy()
+            end
+        end
+
+        -- Create a BoxHandleAdornment for the player
+        local espBox = Instance.new("BoxHandleAdornment")
+        espBox.Adornee = character
+        espBox.Size = character:GetExtentsSize()
+        espBox.AlwaysOnTop = true
+        espBox.ZIndex = 5
+        espBox.Transparency = 0.7
+        espBox.Color3 = player.Team and player.TeamColor.Color or Color3.fromRGB(255, 255, 255)
+        espBox.Parent = character
+
+        -- Create a combined ESP label
+        local textGui, textLabel = createESPLabel(character, espSettings.TextOffset, espSettings.NameColor, "")
+        textGui.Parent = character
+
+        -- Update ESP text
+        local function updateESP()
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                local health = humanoid.Health
+                local maxHealth = humanoid.MaxHealth
+                local walkSpeed = humanoid.WalkSpeed
+                local distance = (game.Players.LocalPlayer.Character.HumanoidRootPart.Position - character.HumanoidRootPart.Position).Magnitude
+                local healthColor = health > maxHealth * 0.5 and espSettings.FullHealthColor or espSettings.LowHealthColor
+                textLabel.Text = string.format("Name: %s\nHealth: %d\nStuds: %d\nWalkSpeed: %d", player.Name, health, math.floor(distance), walkSpeed)
+                textLabel.TextColor3 = healthColor
+            end
+        end
+        updateESP()
+        local healthChangedConnection = character:FindFirstChildOfClass("Humanoid").HealthChanged:Connect(updateESP)
+        local renderSteppedConnection = game:GetService("RunService").RenderStepped:Connect(updateESP)
+
+        -- Recreate ESP on death and respawn
+        local characterDiedConnection = character:FindFirstChildOfClass("Humanoid").Died:Connect(function()
+            if player.Character then
+                player.CharacterAdded:Wait()
+                refreshESP(player.Character)
+            end
+        end)
+
+        -- Store connections for cleanup
+        espConnections[player] = {espBox, textGui, healthChangedConnection, renderSteppedConnection, characterDiedConnection}
+    end
+
+    if player.Character then
+        refreshESP(player.Character)
+    end
+
+    player.CharacterAdded:Connect(function(character)
+        refreshESP(character)
+    end)
+end
+
+-- Function to remove ESP from a player
+local function removeESP(player)
+    if espConnections[player] then
+        for _, conn in ipairs(espConnections[player]) do
+            if typeof(conn) == "RBXScriptConnection" then
+                conn:Disconnect()
+            else
+                conn:Destroy()
+            end
+        end
+        espConnections[player] = nil
+    end
+end
+
+-- Toggle function for ESP
+local function toggleESP(enabled)
+    espEnabled = enabled
+    if espEnabled then
+        for _, player in ipairs(game.Players:GetPlayers()) do
+            createESP(player)
+        end
+        game.Players.PlayerAdded:Connect(createESP)
+        game.Players.PlayerRemoving:Connect(removeESP)
+    else
+        for _, player in ipairs(game.Players:GetPlayers()) do
+            removeESP(player)
+        end
+    end
+end
+
+
+-- GUI Elements
+
+local TargetSection = Tab:AddSection({
+    Name = "Target Setting"
+})
+
+
+
+ 
+Tab:AddToggle({
+    Name = "Enable Aimbot",
+    Default = false,
+    Callback = function(Value)
+        aimbotEnabled = Value
+        if aimbotEnabled then
+            aimAtTarget()
+        end
+    end
+})
+
+Tab:AddButton({
+    Name = "Switch Aim Part",
+    Callback = function()
+        if aimAtPart == "HumanoidRootPart" then
+            aimAtPart = "Head"
+        else
+            aimAtPart = "HumanoidRootPart"
+        end
+        OrionLib:MakeNotification({
+            Name = "Aim Part",
+            Content = "Now aiming at: " .. aimAtPart,
+            Image = "rbxassetid://4483345998",
+            Time = 5
+        })
+    end
+})
+
+OrionLib:Init()
+
+--Second tab
+local Tab = Window:MakeTab({
+    Name = "Visuals",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+
+-- Add a section to the tab
+local Section = Tab:AddSection({
+    Name = "ESP Setting"
+})
+
+-- Add a toggle button in the UI
+Section:AddToggle({
+    Name = "Enable ESP",
+    Default = false,
+    Callback = function(value)
+        toggleESP(value)
+    end
+})
+
+local TargetSection = Tab:AddSection({
+    Name = "wall check Settings"
+})
+
+
+Tab:AddToggle({
+    Name = "Enable Team Check",
+    Default = false,
+    Callback = function(Value)
+        teamCheckEnabled = Value
+    end
+})
+
+Tab:AddToggle({
+    Name = "Enable Wall Check",
+    Default = false,
+    Callback = function(Value)
+        wallCheckEnabled = Value
+    end
+})
+
+
+Tab:AddSlider({
+    Name = "Walk Speed",
+    Min = 0,                                              -- Minimum value for the slider
+    Max = 500,                                            -- Maximum value for the slider
+    Default = 16,                                         -- Default value of the slider
+    Color = Color3.fromRGB(math.random(0, 255), math.random(0, 255), math.random(0, 255)),
+    Callback = function(Value)
+        game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = Value  -- Updates the player's walk speed
+    end
+})
